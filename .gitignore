@@ -1,0 +1,12 @@
+aws-appsync-blog-post.md
+node_modules/
+.DS_Store
+
+.env
+dist/
+build/
+.vscode/
+.idea/
+coverage/
+*.log
+

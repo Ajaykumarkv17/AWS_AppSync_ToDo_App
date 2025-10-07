@@ -1,0 +1,9 @@
+{
+  "name": "todo-app-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "aws cloudformation deploy --template-file cloudformation.yaml --stack-name todo-app-stack --capabilities CAPABILITY_IAM",
+    "delete": "aws cloudformation delete-stack --stack-name todo-app-stack",
+    "outputs": "aws cloudformation describe-stacks --stack-name todo-app-stack --query 'Stacks[0].Outputs'"
+  }
+}

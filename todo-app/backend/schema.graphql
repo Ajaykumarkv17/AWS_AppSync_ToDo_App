@@ -1,0 +1,75 @@
+type Todo @aws_cognito_user_pools {
+  id: ID!
+  title: String!
+  description: String
+  completed: Boolean!
+  priority: Priority!
+  owner: String!
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime!
+  version: Int!
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+type Query {
+  getTodo(id: ID!): Todo
+  listTodos(filter: TableTodoFilterInput, limit: Int, nextToken: String): TodoConnection
+  listMyTodos: [Todo]
+}
+
+type Mutation {
+  createTodo(input: CreateTodoInput!): Todo
+  updateTodo(input: UpdateTodoInput!): Todo
+  deleteTodo(id: ID!): Todo
+  toggleTodo(id: ID!): Todo
+}
+
+type Subscription {
+  onCreateTodo(owner: String): Todo
+    @aws_subscribe(mutations: ["createTodo"])
+  onUpdateTodo(owner: String): Todo
+    @aws_subscribe(mutations: ["updateTodo", "toggleTodo"])
+  onDeleteTodo(owner: String): Todo
+    @aws_subscribe(mutations: ["deleteTodo"])
+}
+
+input CreateTodoInput {
+  title: String!
+  description: String
+  priority: Priority!
+}
+
+input UpdateTodoInput {
+  id: ID!
+  title: String
+  description: String
+  priority: Priority
+  completed: Boolean
+  version: Int!
+}
+
+input TableTodoFilterInput {
+  completed: TableBooleanFilterInput
+  priority: TableStringFilterInput
+}
+
+input TableBooleanFilterInput {
+  eq: Boolean
+  ne: Boolean
+}
+
+input TableStringFilterInput {
+  eq: String
+  ne: String
+  contains: String
+}
+
+type TodoConnection {
+  items: [Todo]
+  nextToken: String
+}
