@@ -60,7 +60,82 @@ Resources:
     Type: AWS::AppSync::GraphQLSchema
     Properties:
       ApiId: !GetAtt AppSyncApi.ApiId
-      DefinitionS3Location: schema.graphql
+      Definition: |
+        type Todo @aws_cognito_user_pools {
+          id: ID!
+          title: String!
+          description: String
+          completed: Boolean!
+          priority: Priority!
+          owner: String!
+          createdAt: AWSDateTime!
+          updatedAt: AWSDateTime!
+          version: Int!
+        }
+
+        enum Priority {
+          LOW
+          MEDIUM
+          HIGH
+        }
+
+        type Query {
+          getTodo(id: ID!): Todo
+          listTodos(filter: TableTodoFilterInput, limit: Int, nextToken: String): TodoConnection
+          listMyTodos: [Todo]
+        }
+
+        type Mutation {
+          createTodo(input: CreateTodoInput!): Todo
+          updateTodo(input: UpdateTodoInput!): Todo
+          deleteTodo(id: ID!): Todo
+          toggleTodo(id: ID!): Todo
+        }
+
+        type Subscription {
+          onCreateTodo(owner: String): Todo
+            @aws_subscribe(mutations: ["createTodo"])
+          onUpdateTodo(owner: String): Todo
+            @aws_subscribe(mutations: ["updateTodo", "toggleTodo"])
+          onDeleteTodo(owner: String): Todo
+            @aws_subscribe(mutations: ["deleteTodo"])
+        }
+
+        input CreateTodoInput {
+          title: String!
+          description: String
+          priority: Priority!
+        }
+
+        input UpdateTodoInput {
+          id: ID!
+          title: String
+          description: String
+          priority: Priority
+          completed: Boolean
+          version: Int!
+        }
+
+        input TableTodoFilterInput {
+          completed: TableBooleanFilterInput
+          priority: TableStringFilterInput
+        }
+
+        input TableBooleanFilterInput {
+          eq: Boolean
+          ne: Boolean
+        }
+
+        input TableStringFilterInput {
+          eq: String
+          ne: String
+          contains: String
+        }
+
+        type TodoConnection {
+          items: [Todo]
+          nextToken: String
+        }
 
   DynamoDBRole:
     Type: AWS::IAM::Role
@@ -99,6 +174,210 @@ Resources:
       DynamoDBConfig:
         TableName: !Ref TodoTable
         AwsRegion: !Ref AWS::Region
+
+  CreateTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: createTodo
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          const id = util.autoId();
+          const now = util.time.nowISO8601();
+          
+          return {
+            operation: 'PutItem',
+            key: util.dynamodb.toMapValues({ id }),
+            attributeValues: util.dynamodb.toMapValues({
+              title: ctx.args.input.title,
+              description: ctx.args.input.description || '',
+              priority: ctx.args.input.priority,
+              completed: false,
+              owner: ctx.identity.username,
+              createdAt: now,
+              updatedAt: now,
+              version: 1
+            })
+          };
+        }
+        
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  UpdateTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: updateTodo
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          const { id, version, ...updates } = ctx.args.input;
+          
+          return {
+            operation: 'UpdateItem',
+            key: util.dynamodb.toMapValues({ id }),
+            update: {
+              expression: 'SET #title = :title, #desc = :desc, #priority = :priority, #completed = :completed, #updatedAt = :updatedAt, #version = :newVersion',
+              expressionNames: {
+                '#title': 'title',
+                '#desc': 'description',
+                '#priority': 'priority',
+                '#completed': 'completed',
+                '#updatedAt': 'updatedAt',
+                '#version': 'version'
+              },
+              expressionValues: util.dynamodb.toMapValues({
+                ':title': updates.title,
+                ':desc': updates.description,
+                ':priority': updates.priority,
+                ':completed': updates.completed,
+                ':updatedAt': util.time.nowISO8601(),
+                ':newVersion': version + 1,
+                ':expectedVersion': version
+              })
+            },
+            condition: {
+              expression: '#version = :expectedVersion',
+              expressionNames: { '#version': 'version' },
+              expressionValues: { ':expectedVersion': { N: version } }
+            }
+          };
+        }
+        
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error('Conflict: Todo was modified by another user', 'ConflictException');
+          }
+          return ctx.result;
+        }
+
+  ToggleTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: toggleTodo
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'UpdateItem',
+            key: util.dynamodb.toMapValues({ id: ctx.args.id }),
+            update: {
+              expression: 'SET #completed = NOT #completed, #updatedAt = :updatedAt, #version = #version + :inc',
+              expressionNames: {
+                '#completed': 'completed',
+                '#updatedAt': 'updatedAt',
+                '#version': 'version'
+              },
+              expressionValues: util.dynamodb.toMapValues({
+                ':updatedAt': util.time.nowISO8601(),
+                ':inc': 1
+              })
+            }
+          };
+        }
+        
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  DeleteTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: deleteTodo
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'DeleteItem',
+            key: util.dynamodb.toMapValues({ id: ctx.args.id })
+          };
+        }
+        
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  GetTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: getTodo
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ id: ctx.args.id })
+          };
+        }
+        
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  ListMyTodosResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Query
+      FieldName: listMyTodos
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          return {
+            operation: 'Query',
+            index: 'owner-index',
+            query: {
+              expression: '#owner = :owner',
+              expressionNames: { '#owner': 'owner' },
+              expressionValues: util.dynamodb.toMapValues({ ':owner': ctx.identity.username })
+            }
+          };
+        }
+        
+        export function response(ctx) {
+          return ctx.result.items;
+        }
 
 Outputs:
   GraphQLApiEndpoint:

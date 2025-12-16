@@ -9,4 +9,8 @@ build/
 .idea/
 coverage/
 *.log
+.next
+amplify-config.ts
+package-lock.json
+
 
