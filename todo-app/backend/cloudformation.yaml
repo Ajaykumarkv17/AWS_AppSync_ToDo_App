@@ -266,12 +266,11 @@ Resources:
           return ctx.result;
         }
 
-  ToggleTodoResolver:
-    Type: AWS::AppSync::Resolver
+  ToggleTodoFunction1:
+    Type: AWS::AppSync::FunctionConfiguration
     Properties:
       ApiId: !GetAtt AppSyncApi.ApiId
-      TypeName: Mutation
-      FieldName: toggleTodo
+      Name: GetTodoFunction
       DataSourceName: !GetAtt TodoDataSource.Name
       Runtime:
         Name: APPSYNC_JS
@@ -281,21 +280,74 @@ Resources:
         
         export function request(ctx) {
           return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ id: ctx.args.id })
+          };
+        }
+        
+        export function response(ctx) {
+          if (!ctx.result) {
+            util.error('Todo not found');
+          }
+          return ctx.result;
+        }
+
+  ToggleTodoFunction2:
+    Type: AWS::AppSync::FunctionConfiguration
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      Name: UpdateTodoFunction
+      DataSourceName: !GetAtt TodoDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+        
+        export function request(ctx) {
+          const todo = ctx.prev.result;
+          const newCompleted = !todo.completed;
+          
+          return {
             operation: 'UpdateItem',
             key: util.dynamodb.toMapValues({ id: ctx.args.id }),
             update: {
-              expression: 'SET #completed = NOT #completed, #updatedAt = :updatedAt, #version = #version + :inc',
+              expression: 'SET #completed = :completed, #updatedAt = :updatedAt, #version = #version + :inc',
               expressionNames: {
                 '#completed': 'completed',
                 '#updatedAt': 'updatedAt',
                 '#version': 'version'
               },
               expressionValues: util.dynamodb.toMapValues({
+                ':completed': newCompleted,
                 ':updatedAt': util.time.nowISO8601(),
                 ':inc': 1
               })
             }
           };
+        }
+        
+        export function response(ctx) {
+          return ctx.result;
+        }
+
+  ToggleTodoResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !GetAtt AppSyncApi.ApiId
+      TypeName: Mutation
+      FieldName: toggleTodo
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt ToggleTodoFunction1.FunctionId
+          - !GetAtt ToggleTodoFunction2.FunctionId
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        export function request(ctx) {
+          return {};
         }
         
         export function response(ctx) {

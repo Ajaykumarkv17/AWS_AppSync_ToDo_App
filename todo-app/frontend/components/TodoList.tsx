@@ -39,7 +39,14 @@ export default function TodoList() {
     // Real-time create subscription
     const createSub = client.graphql({ query: onCreateTodo }).subscribe({
       next: ({ data }) => {
-        setTodos(prev => [...prev, data.onCreateTodo]);
+        setTodos(prev => {
+          // Check if todo already exists to prevent duplicates
+          const exists = prev.some(todo => todo.id === data.onCreateTodo.id);
+          if (exists) {
+            return prev;
+          }
+          return [...prev, data.onCreateTodo];
+        });
       },
       error: (error) => console.error('Create subscription error:', error)
     });
@@ -79,6 +86,7 @@ export default function TodoList() {
         query: createTodo,
         variables: { input: { title, priority } }
       });
+      
       setTitle('');
     } catch (error) {
       console.error('Error creating todo:', error);
