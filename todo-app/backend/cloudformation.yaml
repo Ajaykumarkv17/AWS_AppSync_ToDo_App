@@ -328,7 +328,7 @@ Resources:
         }
         
         export function response(ctx) {
-          return ctx.result;
+          return { ...ctx.prev.result, ...ctx.result };
         }
 
   ToggleTodoResolver:

@@ -39,14 +39,16 @@ export default function TodoList() {
     // Real-time create subscription
     const createSub = client.graphql({ query: onCreateTodo }).subscribe({
       next: ({ data }) => {
-        setTodos(prev => {
-          // Check if todo already exists to prevent duplicates
-          const exists = prev.some(todo => todo.id === data.onCreateTodo.id);
-          if (exists) {
-            return prev;
-          }
-          return [...prev, data.onCreateTodo];
-        });
+        if (data?.onCreateTodo) {
+          setTodos(prev => {
+            // Check if todo already exists to prevent duplicates
+            const exists = prev.some(todo => todo.id === data.onCreateTodo.id);
+            if (exists) {
+              return prev;
+            }
+            return [...prev, data.onCreateTodo];
+          });
+        }
       },
       error: (error) => console.error('Create subscription error:', error)
     });
@@ -54,9 +56,11 @@ export default function TodoList() {
     // Real-time update subscription
     const updateSub = client.graphql({ query: onUpdateTodo }).subscribe({
       next: ({ data }) => {
-        setTodos(prev => prev.map(todo => 
-          todo.id === data.onUpdateTodo.id ? { ...todo, ...data.onUpdateTodo } : todo
-        ));
+        if (data?.onUpdateTodo) {
+          setTodos(prev => prev.map(todo => 
+            todo.id === data.onUpdateTodo.id ? { ...todo, ...data.onUpdateTodo } : todo
+          ));
+        }
       },
       error: (error) => console.error('Update subscription error:', error)
     });
@@ -64,7 +68,9 @@ export default function TodoList() {
     // Real-time delete subscription
     const deleteSub = client.graphql({ query: onDeleteTodo }).subscribe({
       next: ({ data }) => {
-        setTodos(prev => prev.filter(todo => todo.id !== data.onDeleteTodo.id));
+        if (data?.onDeleteTodo) {
+          setTodos(prev => prev.filter(todo => todo.id !== data.onDeleteTodo.id));
+        }
       },
       error: (error) => console.error('Delete subscription error:', error)
     });
@@ -96,6 +102,11 @@ export default function TodoList() {
   };
 
   const handleToggle = async (id: string) => {
+    // Optimistic update
+    setTodos(prev => prev.map(todo => 
+      todo.id === id ? { ...todo, completed: !todo.completed } : todo
+    ));
+
     try {
       await client.graphql({
         query: toggleTodo,
@@ -103,6 +114,10 @@ export default function TodoList() {
       });
     } catch (error) {
       console.error('Error toggling todo:', error);
+      // Revert on error
+      setTodos(prev => prev.map(todo => 
+        todo.id === id ? { ...todo, completed: !todo.completed } : todo
+      ));
     }
   };
 
